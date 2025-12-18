@@ -18,7 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
+#include <math.h>
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -26,7 +26,16 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+typedef enum {
+    ESTADO_INICIO,
+    ESTADO_J1_APUNTANDO,
+    ESTADO_J1_DISPARO,
+    ESTADO_J1_IMPACTO,
+    ESTADO_J2_APUNTANDO,
+    ESTADO_J2_DISPARO,
+    ESTADO_J2_IMPACTO,
+    ESTADO_GAME_OVER
+} EstadoJuego;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -40,21 +49,124 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+SPI_HandleTypeDef hspi1;
 
 /* USER CODE BEGIN PV */
+// --- CONFIGURACIÓN DE PANTALLA ---
+#define NUM_DEVICES 8
+#define ANCHO_TOTAL 32
+#define ALTO_TOTAL  16
 
+// Buffer de pantalla: 16 filas de 32 bits (usamos uint32_t para simplificar las filas)
+// Un 1 es LED encendido, 0 apagado.
+volatile uint32_t framebuffer[ALTO_TOTAL];
+
+// --- COMANDOS MAX7219 ---
+#define MAX7219_DECODE_MODE  0x09
+#define MAX7219_INTENSITY    0x0A
+#define MAX7219_SCAN_LIMIT   0x0B
+#define MAX7219_SHUTDOWN     0x0C
+#define MAX7219_TEST         0x0F
+
+// Variables del Juego
+EstadoJuego estado_actual = ESTADO_INICIO;
+
+// Posiciones (Coordenadas X, Y)
+int tanque1_x = 2, tanque1_y = 15;   // J1 Izquierda
+int tanque2_x = 29, tanque2_y = 15;  // J2 Derecha
+
+// Variables de la Bala (Usamos float para la física)
+float bala_x, bala_y;
+float bala_vx, bala_vy;
+
+// Temporizadores y Banderas
+uint32_t timer_animacion = 0;
+uint8_t flag_disparo = 0; // Se pondrá a 1 en la interrupción
+extern SPI_HandleTypeDef hspi1;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+// 1. Envía un comando a TODOS los chips MAX7219 a la vez
+void MAX7219_SendAll(uint8_t address, uint8_t data) {
+    uint8_t paquete[2];
+    paquete[0] = address;
+    paquete[1] = data;
 
+    // Bajamos CS
+    HAL_GPIO_WritePin(CS_MATRIZ_GPIO_Port, CS_MATRIZ_Pin, GPIO_PIN_RESET);
+
+    // Enviamos el mismo dato repetido 8 veces para que llegue a todos los chips de la cadena
+    for(int i = 0; i < NUM_DEVICES; i++) {
+        HAL_SPI_Transmit(&hspi1, paquete, 2, 10);
+    }
+
+    // Subimos CS
+    HAL_GPIO_WritePin(CS_MATRIZ_GPIO_Port, CS_MATRIZ_Pin, GPIO_PIN_SET);
+}
+
+// 2. Inicialización de la pantalla
+void MAX7219_Init(void) {
+    MAX7219_SendAll(MAX7219_SHUTDOWN, 0x01);    // Encender
+    MAX7219_SendAll(MAX7219_DECODE_MODE, 0x00); // Modo matriz de puntos
+    MAX7219_SendAll(MAX7219_SCAN_LIMIT, 0x07);  // Usar las 8 filas
+    MAX7219_SendAll(MAX7219_INTENSITY, 0x01);   // Brillo MÍNIMO (Para no quemar nada en pruebas)
+    MAX7219_SendAll(MAX7219_TEST, 0x00);        // Test apagado
+}
+
+// 3. Poner un píxel en el Buffer RAM
+void SetPixel(int x, int y, int color) {
+    if (x >= 0 && x < ANCHO_TOTAL && y >= 0 && y < ALTO_TOTAL) {
+        if (color) {
+            framebuffer[y] |= (1UL << x);  // Pone un 1 en la posición X
+        } else {
+            framebuffer[y] &= ~(1UL << x); // Pone un 0 en la posición X
+        }
+    }
+}
+
+// 4. Limpiar pantalla (RAM)
+void ClearScreen(void) {
+    for (int i = 0; i < ALTO_TOTAL; i++) framebuffer[i] = 0;
+}
+
+// 5. Enviar el Buffer RAM a los LEDs (Versión Simplificada)
+// NOTA:Esta función habrá que ajustarla cuando se conecte los cables para ver el orden correcto
+void UpdateDisplay(void) {
+    // Recorremos las 8 filas internas de los chips
+    for (int fila = 0; fila < 8; fila++) {
+        HAL_GPIO_WritePin(CS_MATRIZ_GPIO_Port, CS_MATRIZ_Pin, GPIO_PIN_RESET);
+
+        // Enviamos datos. El orden depende de cómo se conecten los módulos
+        // Aquí asumimos un orden lineal simple
+        for (int chip = NUM_DEVICES - 1; chip >= 0; chip--) {
+            uint8_t datos = 0;
+
+            // Lógica temporal de mapeo:
+            // Si chip < 4 es la parte de arriba, si chip >= 4 es la de abajo (ejemplo)
+            // Esto lo arreglaremos con el hardware delante
+            // Por ahora enviamos 0 para que no explote
+
+            uint8_t paquete[2];
+            paquete[0] = fila + 1; // Registro (1 a 8)
+            paquete[1] = datos;
+            HAL_SPI_Transmit(&hspi1, paquete, 2, 10);
+        }
+        HAL_GPIO_WritePin(CS_MATRIZ_GPIO_Port, CS_MATRIZ_Pin, GPIO_PIN_SET);
+    }
+}
+//6-Funcion para clacular y dibujar los disparos
+void CalcularYDibujar(void){
+
+}
 /* USER CODE END 0 */
 
 /**
@@ -86,8 +198,10 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
-
+  MAX7219_Init(); // Despertamos los chips
+    ClearScreen();  // Limpiamos basura
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -95,7 +209,15 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
+	  // 1. Calculamos física y pintamos en memoria RAM
+	        // (Necesitas pegar la función CalcularYDibujar en USER CODE BEGIN 0 primero)
+	        CalcularYDibujar();
 
+	        // 2. Enviamos la RAM a los LEDs
+	        UpdateDisplay();
+
+	        // 3. Control de velocidad (FPS)
+	        HAL_Delay(50);
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -124,9 +246,9 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
   RCC_OscInitStruct.PLL.PLLM = 8;
-  RCC_OscInitStruct.PLL.PLLN = 192;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV8;
-  RCC_OscInitStruct.PLL.PLLQ = 8;
+  RCC_OscInitStruct.PLL.PLLN = 50;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
+  RCC_OscInitStruct.PLL.PLLQ = 7;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -139,12 +261,50 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief SPI1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI1_Init(void)
+{
+
+  /* USER CODE BEGIN SPI1_Init 0 */
+
+  /* USER CODE END SPI1_Init 0 */
+
+  /* USER CODE BEGIN SPI1_Init 1 */
+
+  /* USER CODE END SPI1_Init 1 */
+  /* SPI1 parameter configuration*/
+  hspi1.Instance = SPI1;
+  hspi1.Init.Mode = SPI_MODE_MASTER;
+  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi1.Init.NSS = SPI_NSS_SOFT;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi1.Init.CRCPolynomial = 10;
+  if (HAL_SPI_Init(&hspi1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI1_Init 2 */
+
+  /* USER CODE END SPI1_Init 2 */
+
 }
 
 /**
@@ -160,24 +320,119 @@ static void MX_GPIO_Init(void)
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOE_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(CS_I2C_SPI_GPIO_Port, CS_I2C_SPI_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : PA0 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(OTG_FS_PowerSwitchOn_GPIO_Port, OTG_FS_PowerSwitchOn_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(CS_MATRIZ_GPIO_Port, CS_MATRIZ_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOD, LD4_Pin|LD3_Pin|LD5_Pin|LD6_Pin
+                          |Audio_RST_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : CS_I2C_SPI_Pin */
+  GPIO_InitStruct.Pin = CS_I2C_SPI_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(CS_I2C_SPI_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : OTG_FS_PowerSwitchOn_Pin */
+  GPIO_InitStruct.Pin = OTG_FS_PowerSwitchOn_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(OTG_FS_PowerSwitchOn_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PDM_OUT_Pin */
+  GPIO_InitStruct.Pin = PDM_OUT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
+  HAL_GPIO_Init(PDM_OUT_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : CS_MATRIZ_Pin */
+  GPIO_InitStruct.Pin = CS_MATRIZ_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(CS_MATRIZ_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : BTN_J1_Pin BTN_J2_Pin */
+  GPIO_InitStruct.Pin = BTN_J1_Pin|BTN_J2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PD12 PD13 PD14 PD15 */
-  GPIO_InitStruct.Pin = GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
+  /*Configure GPIO pin : BOOT1_Pin */
+  GPIO_InitStruct.Pin = BOOT1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(BOOT1_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : CLK_IN_Pin */
+  GPIO_InitStruct.Pin = CLK_IN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
+  HAL_GPIO_Init(CLK_IN_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : LD4_Pin LD3_Pin LD5_Pin LD6_Pin
+                           Audio_RST_Pin */
+  GPIO_InitStruct.Pin = LD4_Pin|LD3_Pin|LD5_Pin|LD6_Pin
+                          |Audio_RST_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : I2S3_MCK_Pin I2S3_SCK_Pin I2S3_SD_Pin */
+  GPIO_InitStruct.Pin = I2S3_MCK_Pin|I2S3_SCK_Pin|I2S3_SD_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF6_SPI3;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : VBUS_FS_Pin */
+  GPIO_InitStruct.Pin = VBUS_FS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(VBUS_FS_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : OTG_FS_ID_Pin OTG_FS_DM_Pin OTG_FS_DP_Pin */
+  GPIO_InitStruct.Pin = OTG_FS_ID_Pin|OTG_FS_DM_Pin|OTG_FS_DP_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF10_OTG_FS;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : OTG_FS_OverCurrent_Pin */
+  GPIO_InitStruct.Pin = OTG_FS_OverCurrent_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(OTG_FS_OverCurrent_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : Audio_SCL_Pin Audio_SDA_Pin */
+  GPIO_InitStruct.Pin = Audio_SCL_Pin|Audio_SDA_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -185,7 +440,17 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-
+//Interrupcion
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+    // Si pulsa J1 (PB0) y estamos en su turno
+    if (GPIO_Pin == BTN_J1_Pin && estado_actual == ESTADO_J1_APUNTANDO) {
+        flag_disparo = 1;
+    }
+    // Si pulsa J2 (PB1) y estamos en su turno
+    if (GPIO_Pin == BTN_J2_Pin && estado_actual == ESTADO_J2_APUNTANDO) {
+        flag_disparo = 1;
+    }
+}
 /* USER CODE END 4 */
 
 /**
