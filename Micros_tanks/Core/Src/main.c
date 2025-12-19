@@ -18,7 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include <math.h>
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -56,11 +56,23 @@ SPI_HandleTypeDef hspi1;
 #define NUM_DEVICES 8
 #define ANCHO_TOTAL 32
 #define ALTO_TOTAL  16
+//---Constantes---
 
 // Buffer de pantalla: 16 filas de 32 bits (usamos uint32_t para simplificar las filas)
 // Un 1 es LED encendido, 0 apagado.
 volatile uint32_t framebuffer[ALTO_TOTAL];
 
+//Constantes escenario
+#define ANCHO_PANTALLA  32  // Cambia esto si tu pantalla es diferente
+#define ALTO_PANTALLA   16
+#define SUELO_Y         15  // Altura donde está la línea del suelo
+// --- DISEÑO DEL TANQUE ---
+// 1 = Dibujar, 0 = Vacío
+const int FORMA_TANQUE[3][3] = {
+    {0, 0, 1}, // Arriba: Cañón
+    {1, 1, 0}, // Medio: Cuerpo
+    {1, 1, 1}  // Abajo: Orugas
+};
 // --- COMANDOS MAX7219 ---
 #define MAX7219_DECODE_MODE  0x09
 #define MAX7219_INTENSITY    0x0A
@@ -70,18 +82,21 @@ volatile uint32_t framebuffer[ALTO_TOTAL];
 
 // Variables del Juego
 EstadoJuego estado_actual = ESTADO_INICIO;
-
+//variable temporales
+volatile float input_angulo = 45.0;     // Ángulo inicial de prueba
+volatile float input_velocidad = 2.5;   // Fuerza inicial
+volatile uint8_t input_disparar = 0;    // Bandera de disparo
 // Posiciones (Coordenadas X, Y)
-int tanque1_x = 2, tanque1_y = 15;   // J1 Izquierda
-int tanque2_x = 29, tanque2_y = 15;  // J2 Derecha
+volatile int tanque1_x = 2, tanque1_y = 13;   // J1 Izquierda
+volatile int tanque2_x = 29, tanque2_y = 13;  // J2 Derecha
 
 // Variables de la Bala (Usamos float para la física)
-float bala_x, bala_y;
-float bala_vx, bala_vy;
+volatile float bala_x, bala_y;
+volatile float bala_vx, bala_vy;
 
 // Temporizadores y Banderas
-uint32_t timer_animacion = 0;
-uint8_t flag_disparo = 0; // Se pondrá a 1 en la interrupción
+volatile uint32_t timer_animacion = 0;
+volatile uint8_t flag_disparo = 0; // Se pondrá a 1 en la interrupción
 extern SPI_HandleTypeDef hspi1;
 /* USER CODE END PV */
 
@@ -119,7 +134,7 @@ void MAX7219_Init(void) {
     MAX7219_SendAll(MAX7219_DECODE_MODE, 0x00); // Modo matriz de puntos
     MAX7219_SendAll(MAX7219_SCAN_LIMIT, 0x07);  // Usar las 8 filas
     MAX7219_SendAll(MAX7219_INTENSITY, 0x01);   // Brillo MÍNIMO (Para no quemar nada en pruebas)
-    MAX7219_SendAll(MAX7219_TEST, 0x00);        // Test apagado
+    MAX7219_SendAll(0x0F, 0x00);      // Test apagado
 }
 
 // 3. Poner un píxel en el Buffer RAM
@@ -141,30 +156,92 @@ void ClearScreen(void) {
 // 5. Enviar el Buffer RAM a los LEDs (Versión Simplificada)
 // NOTA:Esta función habrá que ajustarla cuando se conecte los cables para ver el orden correcto
 void UpdateDisplay(void) {
-    // Recorremos las 8 filas internas de los chips
-    for (int fila = 0; fila < 8; fila++) {
-        HAL_GPIO_WritePin(CS_MATRIZ_GPIO_Port, CS_MATRIZ_Pin, GPIO_PIN_RESET);
+	// Recorremos las 8 filas físicas de los módulos LED
+	    for (int row = 0; row < 8; row++) {
+	        HAL_GPIO_WritePin(CS_MATRIZ_GPIO_Port, CS_MATRIZ_Pin, GPIO_PIN_RESET);
 
-        // Enviamos datos. El orden depende de cómo se conecten los módulos
-        // Aquí asumimos un orden lineal simple
-        for (int chip = NUM_DEVICES - 1; chip >= 0; chip--) {
-            uint8_t datos = 0;
+	        // NOTA: El orden de envío depende de cómo has cableado.
+	        // Asumimos: Primero entran datos para los últimos chips (Abajo), luego los primeros (Arriba)
 
-            // Lógica temporal de mapeo:
-            // Si chip < 4 es la parte de arriba, si chip >= 4 es la de abajo (ejemplo)
-            // Esto lo arreglaremos con el hardware delante
-            // Por ahora enviamos 0 para que no explote
+	        // --- 1. ENVIAR DATOS FILAS 8-15 (Módulos de Abajo: Chips 4,5,6,7) ---
+	        // La fila 'row' del hardware corresponde a 'row + 8' en nuestro buffer lógico
+	        uint32_t linea_abajo = framebuffer[row + 8];
 
-            uint8_t paquete[2];
-            paquete[0] = fila + 1; // Registro (1 a 8)
-            paquete[1] = datos;
-            HAL_SPI_Transmit(&hspi1, paquete, 2, 10);
+	        // Enviamos byte a byte (Chip 7, 6, 5, 4)
+	        for(int m = 3; m >= 0; m--) {
+	            uint8_t byte = (linea_abajo >> (m * 8)) & 0xFF;
+	            uint8_t paq[2] = { row + 1, byte };
+	            HAL_SPI_Transmit(&hspi1, paq, 2, 10);
+	        }
+
+	        // --- 2. ENVIAR DATOS FILAS 0-7 (Módulos de Arriba: Chips 0,1,2,3) ---
+	        // La fila 'row' del hardware corresponde a 'row' en nuestro buffer
+	        uint32_t linea_arriba = framebuffer[row];
+
+	        // Enviamos byte a byte (Chip 3, 2, 1, 0)
+	        for(int m = 3; m >= 0; m--) {
+	            uint8_t byte = (linea_arriba >> (m * 8)) & 0xFF;
+	            uint8_t paq[2] = { row + 1, byte };
+	            HAL_SPI_Transmit(&hspi1, paq, 2, 10);
+	        }
+
+	        HAL_GPIO_WritePin(CS_MATRIZ_GPIO_Port, CS_MATRIZ_Pin, GPIO_PIN_SET);
+	    }
+}
+//Funcion auxiliar para dibujar tanque
+// direccion: 1 = Mira a la derecha (J1), -1 = Mira a la izquierda (J2)
+void PintarTanque(int x, int y, int direccion) {
+    for (int f = 0; f < 3; f++) {
+        for (int c = 0; c < 3; c++) {
+
+            // Lógica de espejo (J1 vs J2)
+            int col_leida = (direccion == 1) ? c : (2 - c);
+
+            if (FORMA_TANQUE[f][col_leida] == 1) {
+                // Dibujamos 1 solo píxel
+                SetPixel(x + c, y + f, 1);
+            }
         }
-        HAL_GPIO_WritePin(CS_MATRIZ_GPIO_Port, CS_MATRIZ_Pin, GPIO_PIN_SET);
     }
 }
-//6-Funcion para clacular y dibujar los disparos
-void CalcularYDibujar(void){
+//6-Dibujar escenario
+void DibujarEscenario(void){
+
+	    // 1. EL SUELO (Fila 15)
+	    // Toda la fila de abajo encendiendo leds
+	    for(int x = 0; x < ANCHO_PANTALLA; x++) {
+	        SetPixel(x, SUELO_Y, 1);
+	    }
+
+	    // 2.MUROS
+
+	    int altura_muro = 7;
+	    for(int y = SUELO_Y - altura_muro; y < SUELO_Y; y++) {
+	        SetPixel(13, y, 1); // Parte izquierda del muro
+	        SetPixel(14, y, 1); // Parte derecha del muro
+	    }
+	    for(int y = SUELO_Y - altura_muro; y < SUELO_Y; y++) {
+	   	        SetPixel(17, y, 1); // Parte izquierda del muro
+	   	        SetPixel(18, y, 1); // Parte derecha del muro
+	   	    }
+	    // 3. LOS TANQUES
+	    // Tienen que estar apoyados en el suelo (Y=15).
+	    // Como miden 3 de alto, su esquina superior (y_tanque) empieza en 15 - 3 + 1 = 13.
+	    // (Fila 13, Fila 14, Fila 15) -> Ocupan esas 3.
+	    int y_tanques = 12; // Ajustado para que las orugas toquen el suelo
+
+	    // JUGADOR 1 (Izquierda)
+	    // Dejamos 1 píxel de margen a la izquierda -> x=1
+	    PintarTanque(1, y_tanques, 1);
+
+	    // JUGADOR 2 (Derecha)
+	    // Ancho(32) - Margen(1) - AnchoTanque(3) = 28
+	    PintarTanque(28, y_tanques, -1);
+
+}
+
+//7-Funcion para clacular y dibujar los disparos
+void CalcularYDibujar(void) {
 
 }
 /* USER CODE END 0 */
@@ -209,15 +286,21 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-	  // 1. Calculamos física y pintamos en memoria RAM
-	        // (Necesitas pegar la función CalcularYDibujar en USER CODE BEGIN 0 primero)
-	        CalcularYDibujar();
+	  // 1. Borramos la memoria anterior
+	        ClearScreen();
 
-	        // 2. Enviamos la RAM a los LEDs
+	        // 2. Calculamos y dibujamos en la RAM
+	        DibujarEscenario(); // Pinta suelo, muro y tanques
+
+	        // 3. Enviamos la RAM a los LEDs (¡Esto es lo que enciende las luces!)
 	        UpdateDisplay();
 
-	        // 3. Control de velocidad (FPS)
-	        HAL_Delay(50);
+	        // 4. Pausa para que el ojo lo vea
+	        HAL_Delay(100);
+
+	        // DIAGNÓSTICO: Hacemos parpadear el LED de la placa para saber que está vivo
+	        // (Asegúrate que LD4_Pin es el LED de tu placa, suele ser GPIOD o GPIOA)
+	        HAL_GPIO_TogglePin(GPIOD, LD4_Pin);
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -292,7 +375,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
