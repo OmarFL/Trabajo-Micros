@@ -1,0 +1,12 @@
+../Core/Src/fisicas.c:14:11:Fisicas_GetBuffer	1
+../Core/Src/fisicas.c:18:6:ClearScreen	2
+../Core/Src/fisicas.c:22:6:SetPixel	6
+../Core/Src/fisicas.c:32:5:Fisicas_GetBalaX	1
+../Core/Src/fisicas.c:33:5:Fisicas_GetBalaY	1
+../Core/Src/fisicas.c:36:6:PintarTanque	5
+../Core/Src/fisicas.c:51:6:DibujarEscenario	3
+../Core/Src/fisicas.c:69:6:Fisicas_IniciarDisparo	2
+../Core/Src/fisicas.c:88:9:ProcesarBala	18
+../Core/Src/fisicas.c:120:6:DibujarExplosion	4
+../Core/Src/fisicas.c:162:13:DibujarLetra8x8	4
+../Core/Src/fisicas.c:174:6:DibujarGameOver	1

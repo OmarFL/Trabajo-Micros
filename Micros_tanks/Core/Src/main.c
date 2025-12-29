@@ -1,328 +1,152 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2025 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
+  * MAIN LIMPIO Y MODULARIZADO
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
-
-/* USER CODE END Includes */
-
-/* Private typedef -----------------------------------------------------------*/
-/* USER CODE BEGIN PTD */
-typedef enum {
-    ESTADO_INICIO,
-    ESTADO_J1_APUNTANDO,
-    ESTADO_J1_DISPARO,
-    ESTADO_J1_IMPACTO,
-    ESTADO_J2_APUNTANDO,
-    ESTADO_J2_DISPARO,
-    ESTADO_J2_IMPACTO,
-    ESTADO_GAME_OVER
-} EstadoJuego;
-/* USER CODE END PTD */
-
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
-
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
-/* USER CODE END PM */
+#include "drivers_hardware.h" // Driver Pantalla
+#include "fisicas.h"          // Motor Gráfico y Físico
+// #include "fsm_juego.h"     // <--- DESCOMENTAR CUANDO TENGAS EL ARCHIVO DE TU COMPAÑERO
 
 /* Private variables ---------------------------------------------------------*/
 SPI_HandleTypeDef hspi1;
 
 /* USER CODE BEGIN PV */
-// --- CONFIGURACIÓN DE PANTALLA ---
-#define NUM_DEVICES 8
-#define ANCHO_TOTAL 32
-#define ALTO_TOTAL  16
-//---Constantes---
+// Flags globales para comunicarse con la FSM
+volatile uint8_t flag_boton_j1 = 0;
+volatile uint8_t flag_boton_j2 = 0;
 
-// Buffer de pantalla: 16 filas de 32 bits (usamos uint32_t para simplificar las filas)
-// Un 1 es LED encendido, 0 apagado.
-volatile uint32_t framebuffer[ALTO_TOTAL];
-
-//Constantes escenario
-#define ANCHO_PANTALLA  32  // Cambia esto si tu pantalla es diferente
-#define ALTO_PANTALLA   16
-#define SUELO_Y         15  // Altura donde está la línea del suelo
-// --- DISEÑO DEL TANQUE ---
-// 1 = Dibujar, 0 = Vacío
-const int FORMA_TANQUE[3][3] = {
-    {0, 0, 1}, // Arriba: Cañón
-    {1, 1, 0}, // Medio: Cuerpo
-    {1, 1, 1}  // Abajo: Orugas
-};
-// --- COMANDOS MAX7219 ---
-#define MAX7219_DECODE_MODE  0x09
-#define MAX7219_INTENSITY    0x0A
-#define MAX7219_SCAN_LIMIT   0x0B
-#define MAX7219_SHUTDOWN     0x0C
-#define MAX7219_TEST         0x0F
-
-// Variables del Juego
-EstadoJuego estado_actual = ESTADO_INICIO;
-//variable temporales
-volatile float input_angulo = 45.0;     // Ángulo inicial de prueba
-volatile float input_velocidad = 2.5;   // Fuerza inicial
-volatile uint8_t input_disparar = 0;    // Bandera de disparo
-// Posiciones (Coordenadas X, Y)
-volatile int tanque1_x = 2, tanque1_y = 13;   // J1 Izquierda
-volatile int tanque2_x = 29, tanque2_y = 13;  // J2 Derecha
-
-// Variables de la Bala (Usamos float para la física)
-volatile float bala_x, bala_y;
-volatile float bala_vx, bala_vy;
-
-// Temporizadores y Banderas
-volatile uint32_t timer_animacion = 0;
-volatile uint8_t flag_disparo = 0; // Se pondrá a 1 en la interrupción
-extern SPI_HandleTypeDef hspi1;
+// Posiciones de los tanques (Variables de estado)
+int t1_x = 1, t1_y = 12;
+int t2_x = 28, t2_y = 12;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_SPI1_Init(void);
-/* USER CODE BEGIN PFP */
 
-/* USER CODE END PFP */
-
-/* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-// 1. Envía un comando a TODOS los chips MAX7219 a la vez
-void MAX7219_SendAll(uint8_t address, uint8_t data) {
-    uint8_t paquete[2];
-    paquete[0] = address;
-    paquete[1] = data;
-
-    // Bajamos CS
-    HAL_GPIO_WritePin(CS_MATRIZ_GPIO_Port, CS_MATRIZ_Pin, GPIO_PIN_RESET);
-
-    // Enviamos el mismo dato repetido 8 veces para que llegue a todos los chips de la cadena
-    for(int i = 0; i < NUM_DEVICES; i++) {
-        HAL_SPI_Transmit(&hspi1, paquete, 2, 10);
-    }
-
-    // Subimos CS
-    HAL_GPIO_WritePin(CS_MATRIZ_GPIO_Port, CS_MATRIZ_Pin, GPIO_PIN_SET);
-}
-
-// 2. Inicialización de la pantalla
-void MAX7219_Init(void) {
-    MAX7219_SendAll(MAX7219_SHUTDOWN, 0x01);    // Encender
-    MAX7219_SendAll(MAX7219_DECODE_MODE, 0x00); // Modo matriz de puntos
-    MAX7219_SendAll(MAX7219_SCAN_LIMIT, 0x07);  // Usar las 8 filas
-    MAX7219_SendAll(MAX7219_INTENSITY, 0x01);   // Brillo MÍNIMO (Para no quemar nada en pruebas)
-    MAX7219_SendAll(0x0F, 0x00);      // Test apagado
-}
-
-// 3. Poner un píxel en el Buffer RAM
-void SetPixel(int x, int y, int color) {
-    if (x >= 0 && x < ANCHO_TOTAL && y >= 0 && y < ALTO_TOTAL) {
-        if (color) {
-            framebuffer[y] |= (1UL << x);  // Pone un 1 en la posición X
-        } else {
-            framebuffer[y] &= ~(1UL << x); // Pone un 0 en la posición X
-        }
-    }
-}
-
-// 4. Limpiar pantalla (RAM)
-void ClearScreen(void) {
-    for (int i = 0; i < ALTO_TOTAL; i++) framebuffer[i] = 0;
-}
-
-// 5. Enviar el Buffer RAM a los LEDs (Versión Simplificada)
-// NOTA:Esta función habrá que ajustarla cuando se conecte los cables para ver el orden correcto
-void UpdateDisplay(void) {
-	// Recorremos las 8 filas físicas de los módulos LED
-	    for (int row = 0; row < 8; row++) {
-	        HAL_GPIO_WritePin(CS_MATRIZ_GPIO_Port, CS_MATRIZ_Pin, GPIO_PIN_RESET);
-
-	        // NOTA: El orden de envío depende de cómo has cableado.
-	        // Asumimos: Primero entran datos para los últimos chips (Abajo), luego los primeros (Arriba)
-
-	        // --- 1. ENVIAR DATOS FILAS 8-15 (Módulos de Abajo: Chips 4,5,6,7) ---
-	        // La fila 'row' del hardware corresponde a 'row + 8' en nuestro buffer lógico
-	        uint32_t linea_abajo = framebuffer[row + 8];
-
-	        // Enviamos byte a byte (Chip 7, 6, 5, 4)
-	        for(int m = 3; m >= 0; m--) {
-	            uint8_t byte = (linea_abajo >> (m * 8)) & 0xFF;
-	            uint8_t paq[2] = { row + 1, byte };
-	            HAL_SPI_Transmit(&hspi1, paq, 2, 10);
-	        }
-
-	        // --- 2. ENVIAR DATOS FILAS 0-7 (Módulos de Arriba: Chips 0,1,2,3) ---
-	        // La fila 'row' del hardware corresponde a 'row' en nuestro buffer
-	        uint32_t linea_arriba = framebuffer[row];
-
-	        // Enviamos byte a byte (Chip 3, 2, 1, 0)
-	        for(int m = 3; m >= 0; m--) {
-	            uint8_t byte = (linea_arriba >> (m * 8)) & 0xFF;
-	            uint8_t paq[2] = { row + 1, byte };
-	            HAL_SPI_Transmit(&hspi1, paq, 2, 10);
-	        }
-
-	        HAL_GPIO_WritePin(CS_MATRIZ_GPIO_Port, CS_MATRIZ_Pin, GPIO_PIN_SET);
-	    }
-}
-//Funcion auxiliar para dibujar tanque
-// direccion: 1 = Mira a la derecha (J1), -1 = Mira a la izquierda (J2)
-void PintarTanque(int x, int y, int direccion) {
-    for (int f = 0; f < 3; f++) {
-        for (int c = 0; c < 3; c++) {
-
-            // Lógica de espejo (J1 vs J2)
-            int col_leida = (direccion == 1) ? c : (2 - c);
-
-            if (FORMA_TANQUE[f][col_leida] == 1) {
-                // Dibujamos 1 solo píxel
-                SetPixel(x + c, y + f, 1);
-            }
-        }
-    }
-}
-//6-Dibujar escenario
-void DibujarEscenario(void){
-
-	    // 1. EL SUELO (Fila 15)
-	    // Toda la fila de abajo encendiendo leds
-	    for(int x = 0; x < ANCHO_PANTALLA; x++) {
-	        SetPixel(x, SUELO_Y, 1);
-	    }
-
-	    // 2.MUROS
-
-	    int altura_muro = 7;
-	    for(int y = SUELO_Y - altura_muro; y < SUELO_Y; y++) {
-	        SetPixel(13, y, 1); // Parte izquierda del muro
-	        SetPixel(14, y, 1); // Parte derecha del muro
-	    }
-	    for(int y = SUELO_Y - altura_muro; y < SUELO_Y; y++) {
-	   	        SetPixel(17, y, 1); // Parte izquierda del muro
-	   	        SetPixel(18, y, 1); // Parte derecha del muro
-	   	    }
-	    // 3. LOS TANQUES
-	    // Tienen que estar apoyados en el suelo (Y=15).
-	    // Como miden 3 de alto, su esquina superior (y_tanque) empieza en 15 - 3 + 1 = 13.
-	    // (Fila 13, Fila 14, Fila 15) -> Ocupan esas 3.
-	    int y_tanques = 12; // Ajustado para que las orugas toquen el suelo
-
-	    // JUGADOR 1 (Izquierda)
-	    // Dejamos 1 píxel de margen a la izquierda -> x=1
-	    PintarTanque(1, y_tanques, 1);
-
-	    // JUGADOR 2 (Derecha)
-	    // Ancho(32) - Margen(1) - AnchoTanque(3) = 28
-	    PintarTanque(28, y_tanques, -1);
-
-}
-
-//7-Funcion para clacular y dibujar los disparos
-void CalcularYDibujar(void) {
-
-}
+// (Ya no hay funciones aquí, todo está en los .c externos)
 /* USER CODE END 0 */
 
-/**
-  * @brief  The application entry point.
-  * @retval int
-  */
 int main(void)
 {
-
-  /* USER CODE BEGIN 1 */
-
-  /* USER CODE END 1 */
-
-  /* MCU Configuration--------------------------------------------------------*/
-
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
-
-  /* USER CODE BEGIN Init */
-
-  /* USER CODE END Init */
-
-  /* Configure the system clock */
   SystemClock_Config();
-
-  /* USER CODE BEGIN SysInit */
-
-  /* USER CODE END SysInit */
-
-  /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_SPI1_Init();
+
   /* USER CODE BEGIN 2 */
-  MAX7219_Init(); // Despertamos los chips
-    ClearScreen();  // Limpiamos basura
+  // 1. Inicializar Hardware
+  MAX7219_Init();
+
+  // 2. Inicializar FSM (Cuando tu compañero te pase el código)
+  // Juego_t juego;
+  // FSM_Init(&juego);
   /* USER CODE END 2 */
 
   /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
-	  // 1. Borramos la memoria anterior
+	  // --- LIMPIAR PANTALLA ---
 	        ClearScreen();
 
-	        // 2. Calculamos y dibujamos en la RAM
-	        DibujarEscenario(); // Pinta suelo, muro y tanques
+	        // --- DIBUJAR ESCENARIO FIJO ---
+	        DibujarEscenario(t1_x, t1_y, t2_x, t2_y);
 
-	        // 3. Enviamos la RAM a los LEDs (¡Esto es lo que enciende las luces!)
-	        UpdateDisplay();
+	        // --- VARIABLES DE PRUEBA (Estáticas para no perder valor en cada vuelta) ---
+	        static int estado_prueba = 0; // 0=Esperar, 1=Volando, 2=Explotando
+	        static int turno = 1;         // 1=Jugador1, -1=Jugador2
+	        static uint32_t tiempo_inicio_explosion = 0;
+	        static int pos_explosion_x, pos_explosion_y;
+	        //Variable para contar cuántos tiros llevamos
+	              static int contador_turnos = 0;
+	        // --- MÁQUINA DE ESTADOS DE PRUEBA ---
+	        switch (estado_prueba) {
 
-	        // 4. Pausa para que el ojo lo vea
-	        HAL_Delay(100);
+	            // ESTADO 0: Preparar disparo
+	            case 0:
+	                HAL_Delay(500); // Pausa de medio segundo entre turnos
 
-	        // DIAGNÓSTICO: Hacemos parpadear el LED de la placa para saber que está vivo
-	        // (Asegúrate que LD4_Pin es el LED de tu placa, suele ser GPIOD o GPIOA)
-	        HAL_GPIO_TogglePin(GPIOD, LD4_Pin);
-    /* USER CODE BEGIN 3 */
+	                // Configurar disparo: Jugador, Angulo 45, Fuerza 60
+	                int origen_x = (turno == 1) ? t1_x : t2_x;
+	                int origen_y = (turno == 1) ? t1_y : t2_y;
+
+	                Fisicas_IniciarDisparo(turno, 45.0f, 35.0f, origen_x, origen_y);
+
+	                estado_prueba = 1; // ¡Fuego! Pasamos a volar
+	                break;
+
+	            // ESTADO 1: Bala volando
+	            case 1:
+	                // Calculamos objetivo (solo para saber si chocamos con tanque)
+	                int obj_x = (turno == 1) ? t2_x : t1_x;
+	                int obj_y = (turno == 1) ? t2_y : t1_y;
+
+	                // Movemos la bala
+	                uint8_t resultado = ProcesarBala(obj_x, obj_y);
+
+	                // Si chocó con algo (1=Pared/Suelo, 2=Tanque)
+	                if (resultado != 0) {
+	                    // Guardamos DONDE explotó para dibujar la animación ahí
+	                    pos_explosion_x = Fisicas_GetBalaX();
+	                    pos_explosion_y = Fisicas_GetBalaY();
+
+	                    // Iniciamos cronómetro de explosión
+	                    tiempo_inicio_explosion = HAL_GetTick();
+	                    estado_prueba = 2; // Pasamos a explotar
+	                }
+	                break;
+
+	            // ESTADO 2: Animación Explosión
+	            case 2:
+	                // Dibujamos la explosión usando tus tiempos
+	                DibujarExplosion(pos_explosion_x, pos_explosion_y, tiempo_inicio_explosion);
+
+	                // Si ha pasado más de 1.6 segundos (tu tiempo máximo en fisicas.c)
+	                if (HAL_GetTick() - tiempo_inicio_explosion > 1600) {
+	                    // Cambiamos de turno y volvemos a empezar
+	                	// ¡NUEVO! Aumentamos el contador porque el turno ha terminado
+	                	                  contador_turnos++;
+
+	                	                  // ¡NUEVO! Comprobamos si ya van 3 turnos
+	                	                  if (contador_turnos >= 3) {
+
+	                	                      // 1. Dibujamos Game Over
+	                	                      DibujarGameOver();
+	                	                      HW_UpdateDisplay(Fisicas_GetBuffer()); // Forzar pintado
+
+	                	                      // 2. Esperamos 3 segundos para verlo bien
+	                	                      HAL_Delay(3000);
+
+	                	                      // 3. Reiniciamos el contador para volver a jugar
+	                	                      contador_turnos = 0;
+	                	                  }
+	                    turno = (turno == 1) ? -1 : 1;
+	                    estado_prueba = 0;
+	                }
+	                break;
+	        }
+
+	        // --- ENVIAR A PANTALLA ---
+	        HW_UpdateDisplay( Fisicas_GetBuffer() );
+
+	        // Velocidad del juego (50ms = 20 FPS)
+	        HAL_Delay(50);
   }
-  /* USER CODE END 3 */
 }
 
 /**
   * @brief System Clock Configuration
-  * @retval None
   */
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-
-  /** Configure the main internal regulator output voltage
-  */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
-
-  /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
@@ -332,42 +156,18 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLN = 50;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
   RCC_OscInitStruct.PLL.PLLQ = 7;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Initializes the CPU, AHB and APB buses clocks
-  */
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) Error_Handler();
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
-
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
-  {
-    Error_Handler();
-  }
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK) Error_Handler();
 }
 
-/**
-  * @brief SPI1 Initialization Function
-  * @param None
-  * @retval None
-  */
 static void MX_SPI1_Init(void)
 {
-
-  /* USER CODE BEGIN SPI1_Init 0 */
-
-  /* USER CODE END SPI1_Init 0 */
-
-  /* USER CODE BEGIN SPI1_Init 1 */
-
-  /* USER CODE END SPI1_Init 1 */
-  /* SPI1 parameter configuration*/
   hspi1.Instance = SPI1;
   hspi1.Init.Mode = SPI_MODE_MASTER;
   hspi1.Init.Direction = SPI_DIRECTION_2LINES;
@@ -375,34 +175,17 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32; // <--- OJO: 32
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
   hspi1.Init.CRCPolynomial = 10;
-  if (HAL_SPI_Init(&hspi1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN SPI1_Init 2 */
-
-  /* USER CODE END SPI1_Init 2 */
-
+  if (HAL_SPI_Init(&hspi1) != HAL_OK) Error_Handler();
 }
 
-/**
-  * @brief GPIO Initialization Function
-  * @param None
-  * @retval None
-  */
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-  /* USER CODE BEGIN MX_GPIO_Init_1 */
-
-  /* USER CODE END MX_GPIO_Init_1 */
-
-  /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
@@ -410,34 +193,23 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
-  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(CS_I2C_SPI_GPIO_Port, CS_I2C_SPI_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(OTG_FS_PowerSwitchOn_GPIO_Port, OTG_FS_PowerSwitchOn_Pin, GPIO_PIN_SET);
-
-  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(CS_MATRIZ_GPIO_Port, CS_MATRIZ_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOD, LD4_Pin|LD3_Pin|LD5_Pin|LD6_Pin|Audio_RST_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, LD4_Pin|LD3_Pin|LD5_Pin|LD6_Pin
-                          |Audio_RST_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : CS_I2C_SPI_Pin */
   GPIO_InitStruct.Pin = CS_I2C_SPI_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(CS_I2C_SPI_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : OTG_FS_PowerSwitchOn_Pin */
   GPIO_InitStruct.Pin = OTG_FS_PowerSwitchOn_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(OTG_FS_PowerSwitchOn_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PDM_OUT_Pin */
   GPIO_InitStruct.Pin = PDM_OUT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -445,26 +217,25 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
   HAL_GPIO_Init(PDM_OUT_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : CS_MATRIZ_Pin */
+  // CONFIGURACIÓN DE TU PIN CS (Chip Select)
   GPIO_InitStruct.Pin = CS_MATRIZ_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(CS_MATRIZ_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : BTN_J1_Pin BTN_J2_Pin */
+  // BOTONES
   GPIO_InitStruct.Pin = BTN_J1_Pin|BTN_J2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : BOOT1_Pin */
+  // RESTO DE PINES (Audio, USB, LEDs...)
   GPIO_InitStruct.Pin = BOOT1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(BOOT1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : CLK_IN_Pin */
   GPIO_InitStruct.Pin = CLK_IN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -472,16 +243,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
   HAL_GPIO_Init(CLK_IN_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LD4_Pin LD3_Pin LD5_Pin LD6_Pin
-                           Audio_RST_Pin */
-  GPIO_InitStruct.Pin = LD4_Pin|LD3_Pin|LD5_Pin|LD6_Pin
-                          |Audio_RST_Pin;
+  GPIO_InitStruct.Pin = LD4_Pin|LD3_Pin|LD5_Pin|LD6_Pin|Audio_RST_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : I2S3_MCK_Pin I2S3_SCK_Pin I2S3_SD_Pin */
   GPIO_InitStruct.Pin = I2S3_MCK_Pin|I2S3_SCK_Pin|I2S3_SD_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -489,13 +256,11 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF6_SPI3;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : VBUS_FS_Pin */
   GPIO_InitStruct.Pin = VBUS_FS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(VBUS_FS_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : OTG_FS_ID_Pin OTG_FS_DM_Pin OTG_FS_DP_Pin */
   GPIO_InitStruct.Pin = OTG_FS_ID_Pin|OTG_FS_DM_Pin|OTG_FS_DP_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -503,66 +268,28 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF10_OTG_FS;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : OTG_FS_OverCurrent_Pin */
   GPIO_InitStruct.Pin = OTG_FS_OverCurrent_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(OTG_FS_OverCurrent_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : Audio_SCL_Pin Audio_SDA_Pin */
   GPIO_InitStruct.Pin = Audio_SCL_Pin|Audio_SDA_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /* USER CODE BEGIN MX_GPIO_Init_2 */
-
-  /* USER CODE END MX_GPIO_Init_2 */
 }
 
-/* USER CODE BEGIN 4 */
-//Interrupcion
+// INTERRUPCIONES
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-    // Si pulsa J1 (PB0) y estamos en su turno
-    if (GPIO_Pin == BTN_J1_Pin && estado_actual == ESTADO_J1_APUNTANDO) {
-        flag_disparo = 1;
+    // Activamos flags para que la FSM se entere en el bucle principal
+    if (GPIO_Pin == BTN_J1_Pin) {
+        flag_boton_j1 = 1;
     }
-    // Si pulsa J2 (PB1) y estamos en su turno
-    if (GPIO_Pin == BTN_J2_Pin && estado_actual == ESTADO_J2_APUNTANDO) {
-        flag_disparo = 1;
+    if (GPIO_Pin == BTN_J2_Pin) {
+        flag_boton_j2 = 1;
     }
 }
-/* USER CODE END 4 */
 
-/**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
-void Error_Handler(void)
-{
-  /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
-  /* USER CODE END Error_Handler_Debug */
-}
-#ifdef USE_FULL_ASSERT
-/**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
-void assert_failed(uint8_t *file, uint32_t line)
-{
-  /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
-  /* USER CODE END 6 */
-}
-#endif /* USE_FULL_ASSERT */
+void Error_Handler(void) { __disable_irq(); while (1) {} }
