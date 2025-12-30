@@ -129,7 +129,7 @@ int main(void)
 		 sh_potencia = potencia;
 		 sh_grados   = grados;
 		 freq = 200 + sh_potencia * 20;
-		 SonidoPWM_Beep(&sonido,frec,200);
+		 SonidoPWM_Beep(&sonido,freq,200);
 		  while (HAL_NVIC_GetPendingIRQ(EXTI1_IRQn)) { //borrar las solicitudes pendientes
 		 		   __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_1);
 		 		   HAL_NVIC_ClearPendingIRQ(EXTI1_IRQn);
