@@ -1,0 +1,18 @@
+/*
+ * LectorADC.cpp
+ *
+ *  Created on: Dec 30, 2025
+ *      Author: hugo.sierra
+ */
+
+#include "LectorADC.h"
+
+LectorADC::LectorADC() {
+	// TODO Auto-generated constructor stub
+
+}
+
+LectorADC::~LectorADC() {
+	// TODO Auto-generated destructor stub
+}
+

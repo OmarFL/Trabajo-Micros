@@ -1,10 +1,10 @@
-21:44:04 **** Incremental Build of configuration Debug for project Micros_tanks ****
+15:03:27 **** Incremental Build of configuration Debug for project Micros_tanks ****
 make -j16 all 
 arm-none-eabi-size  Micros_tanks.elf 
    text	   data	    bss	    dec	    hex	filename
-  11852	     12	   1748	  13612	   352c	Micros_tanks.elf
+  12776	     12	   1772	  14560	   38e0	Micros_tanks.elf
 Finished building: default.size.stdout
  
 
-21:44:04 Build Finished. 0 errors, 0 warnings. (took 199ms)
+15:03:27 Build Finished. 0 errors, 0 warnings. (took 200ms)
 

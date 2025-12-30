@@ -1,0 +1,38 @@
+#include "LectorADC.h"
+
+/* ADC creado por CubeMX */
+extern ADC_HandleTypeDef hadc1;
+
+void LectorADC_Init(LectorADC_t *lector)
+{
+	lector->grados = 0.0f;
+	lector->potencia = 0.0f;
+	lector->adc_val[0] = 0;
+	lector->adc_val[1] = 0;
+}
+
+void LectorADC_Actualizar(LectorADC_t *lector)
+{
+	HAL_ADC_Start(&hadc1);
+
+	if(HAL_ADC_PollForConversion(&hadc1, 100)==HAL_OK)
+	lector->adc_val[0] = HAL_ADC_GetValue(&hadc1); // lectura primer pot (angulo)
+
+	if(HAL_ADC_PollForConversion(&hadc1, 100)==HAL_OK)
+	lector->adc_val[1] = HAL_ADC_GetValue(&hadc1); //lectura segundo pot (potencia
+
+	HAL_ADC_Stop(&hadc1);
+
+	lector->grados   = (lector->adc_val[0] * 180.0f) / 1023.0f;
+	lector->potencia = (lector->adc_val[1] * 100.0f) / 1023.0f;
+}
+
+float LectorADC_GetGrados(LectorADC_t *lector)
+{
+	return lector->grados;
+}
+
+float LectorADC_GetPotencia(LectorADC_t *lector)
+{
+	return lector->potencia;
+}

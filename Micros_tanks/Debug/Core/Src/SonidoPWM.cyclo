@@ -1,0 +1,5 @@
+../Core/Src/SonidoPWM.c:6:6:SonidoPWM_Init	1
+../Core/Src/SonidoPWM.c:21:6:SonidoPWM_SetFrecuencia	6
+../Core/Src/SonidoPWM.c:36:6:SonidoPWM_Stop	4
+../Core/Src/SonidoPWM.c:41:6:SonidoPWM_Beep	2
+../Core/Src/SonidoPWM.c:54:6:SonidoPWM_Win	1

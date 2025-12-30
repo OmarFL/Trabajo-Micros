@@ -1,0 +1,5 @@
+../Core/Src/SonidoPWM.c:6:6:SonidoPWM_Init	24	static
+../Core/Src/SonidoPWM.c:21:6:SonidoPWM_SetFrecuencia	24	static
+../Core/Src/SonidoPWM.c:36:6:SonidoPWM_Stop	16	static
+../Core/Src/SonidoPWM.c:41:6:SonidoPWM_Beep	32	static
+../Core/Src/SonidoPWM.c:54:6:SonidoPWM_Win	48	static

@@ -1,0 +1,74 @@
+#include "SonidoPWM.h"
+#include "main.h"
+
+extern TIM_HandleTypeDef htim2;
+
+void SonidoPWM_Init(SonidoPWM_t *s,
+		            TIM_HandleTypeDef *htim,
+		            uint32_t channel,
+		            uint32_t timer_clk,
+		            uint32_t prescaler)
+{
+	s->htim = htim;
+	s->channel = channel;
+	s->timer_clk = timer_clk;
+	s->prescaler = prescaler;
+
+	HAL_TIM_PWM_Start(s->htim, s->channel);
+	SonidoPWM_Stop(s);
+}
+
+void SonidoPWM_SetFrecuencia(SonidoPWM_t *s, float freq)
+{
+	//minimo en 0 máximo en 5000
+	if (freq == 0)
+		return;
+	if (freq > 5000)
+		freq = 5000;
+
+	uint32_t period = (uint32_t)( (s->timer_clk / ((s->prescaler + 1) * freq)) - 1);
+
+	__HAL_TIM_SET_AUTORELOAD(s->htim, period);
+	__HAL_TIM_SET_COMPARE(s->htim, s->channel, period / 2);
+
+}
+
+void SonidoPWM_Stop(SonidoPWM_t *s)
+{
+	__HAL_TIM_SET_COMPARE(s->htim, s->channel, 0); //le pasamos frec = 0 para que pare
+}
+
+void SonidoPWM_Beep(SonidoPWM_t *s, float freq, float duration_ms)
+{
+	uint32_t counter = HAL_GetTick();
+	SonidoPWM_SetFrecuencia(s, freq);
+
+	while (HAL_GetTick() - counter < duration_ms)
+	{
+		SonidoPWM_SetFrecuencia(s, freq);
+	}
+
+	SonidoPWM_Stop(s);
+}
+
+void SonidoPWM_Win(SonidoPWM_t *s){
+	float A = 440;
+	float F = 349.228231;
+	float G = 391.995436;
+	float tempo = 150; //bpm
+	float  t_negra = tempo/60 * 1000; //tiempo que dura una nota en ms
+	float  t_corchea = t_negra/4;
+	float t_blanca = 2*t_negra;
+	SonidoPWM_Beep(s,A,t_corchea);
+	SonidoPWM_Beep(s,A,t_corchea);
+	SonidoPWM_Beep(s,A,t_corchea);
+	SonidoPWM_Beep(s,A,t_negra);
+	SonidoPWM_Beep(s,F,t_negra);
+	SonidoPWM_Beep(s,G,t_corchea);
+	SonidoPWM_Beep(s,G,t_corchea);
+	SonidoPWM_Beep(s,A,t_corchea);
+	SonidoPWM_Beep(s,0,t_corchea);//silencio corchea
+	SonidoPWM_Beep(s,G,t_corchea);
+	SonidoPWM_Beep(s,A,t_blanca);
+	SonidoPWM_Stop(s);
+}

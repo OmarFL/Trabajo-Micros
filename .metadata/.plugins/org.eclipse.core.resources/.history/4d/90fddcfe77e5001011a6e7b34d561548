@@ -1,0 +1,17 @@
+/*
+ * LectorADC.h
+ *
+ *  Created on: Dec 30, 2025
+ *      Author: hugo.sierra
+ */
+
+#ifndef SRC_LECTORADC_H_
+#define SRC_LECTORADC_H_
+
+class LectorADC {
+public:
+	LectorADC();
+	virtual ~LectorADC();
+};
+
+#endif /* SRC_LECTORADC_H_ */

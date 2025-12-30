@@ -1,0 +1,27 @@
+#ifndef SRC_LECTORADC_H_
+#define SRC_LECTORADC_H_
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include "main.h"   // aquí están uint16_t, ADC_HandleTypeDef, HAL
+
+#ifdef __cplusplus
+}
+#endif
+
+class LectorADC {
+private:
+	float grados;
+	float potencia;
+	uint16_t ADC_val[2];
+
+public:
+	LectorADC();
+	void actualiza();
+	float getGrados();
+	float getPotencia();
+};
+
+#endif /* SRC_LECTORADC_H_ */

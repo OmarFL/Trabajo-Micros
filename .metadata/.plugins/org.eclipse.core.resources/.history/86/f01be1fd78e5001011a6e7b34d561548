@@ -1,0 +1,40 @@
+/*
+ * LectorADC.cpp
+ *
+ *  Created on: Dec 30, 2025
+ *      Author: hugo.sierra
+ */
+
+#include "LectorADC.h"
+
+LectorADC::LectorADC() {
+	// TODO Auto-generated constructor stub
+
+}
+
+LectorADC::~LectorADC() {
+	// TODO Auto-generated destructor stub
+}
+
+void LectorADC::actualiza(){
+	//lectura potenciometros, es muy complejo por interrupcion
+		  HAL_ADC_Start(&hadc1);
+		  if(HAL_ADC_PollForConversion(&hadc1, 100)==HAL_OK){
+		   ADC_val[0]=HAL_ADC_GetValue(&hadc1); //primer potenciometro(angulo)
+		  }
+		  if(HAL_ADC_PollForConversion(&hadc1, 100)==HAL_OK){
+		    ADC_val[1]=HAL_ADC_GetValue(&hadc1); //segundo (potencia)
+		  }
+		  HAL_ADC_Stop(&hadc1);
+
+		  //conversion
+		  grados   = (ADC_val[0] * 180.0f) / 1023.0f;
+		  potencia = (ADC_val[1] * 100.0f) / 1023.0f;
+}
+
+float LectorADC::getPotencia(){
+	return potencia;
+}
+float LectorADC::getGrados(){
+	return grados;
+}

@@ -1,0 +1,31 @@
+/*
+ * LectorADC.h
+ *
+ *  Created on: Dec 30, 2025
+ *      Author: hugo.sierra
+ */
+
+#ifndef SRC_LECTORADC_H_
+#define SRC_LECTORADC_H_
+ifdef __cplusplus
+extern "C" {
+#endif
+#include "main.h"   // trae HAL, ADC_HandleTypeDef, etc
+#ifdef __cplusplus
+}
+#endif
+
+class LectorADC {
+private:
+	float grados ;
+	float potencia;
+	uint16_t ADC_val[2];
+public:
+	LectorADC();
+	void actualiza(); //acultaliza el valor de grados y potencia
+	float getGrados();
+	float getPotencia();
+	virtual ~LectorADC();
+};
+
+#endif /* SRC_LECTORADC_H_ */

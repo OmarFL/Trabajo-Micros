@@ -1,0 +1,51 @@
+#include "SonidoPWM.h"
+
+void SonidoPWM_Init(SonidoPWM_t *s,
+		            TIM_HandleTypeDef *htim,
+		            uint32_t channel,
+		            uint32_t timer_clk,
+		            uint32_t prescaler)
+{
+	s->htim = htim;
+	s->channel = channel;
+	s->timer_clk = timer_clk;
+	s->prescaler = prescaler;
+
+	HAL_TIM_PWM_Start(s->htim, s->channel);
+	SonidoPWM_Stop(s);
+}
+
+void SonidoPWM_SetFrecuencia(SonidoPWM_t *s, uint32_t freq)
+{
+	//minimo en 0 máximo en 5000
+	if (freq == 0)
+		return;
+	if (freq > 5000)
+		freq = 5000;
+
+	uint32_t period = (s->timer_clk / ((s->prescaler + 1) * freq)) - 1;
+
+	__HAL_TIM_SET_AUTORELOAD(s->htim, period);
+	__HAL_TIM_SET_COMPARE(s->htim, s->channel, period / 2);
+
+	//forzar actualización del timer
+	htim2.Instance->EGR = TIM_EGR_UG;
+}
+
+void SonidoPWM_Stop(SonidoPWM_t *s)
+{
+	__HAL_TIM_SET_COMPARE(s->htim, s->channel, 0); //le pasamos frec = 0 para que pare
+}
+
+void SonidoPWM_Beep(SonidoPWM_t *s, uint32_t freq, uint32_t duration_ms)
+{
+	uint32_t counter = HAL_GetTick();
+	SonidoPWM_SetFrecuencia(s, freq);
+
+	while (HAL_GetTick() - counter < duration_ms)
+	{
+		SonidoPWM_SetFrecuencia(s, freq);
+	}
+
+	SonidoPWM_Stop(s);
+}

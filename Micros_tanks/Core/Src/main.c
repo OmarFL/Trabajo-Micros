@@ -11,6 +11,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "LectorADC.h"
+#include "SonidoPWM.h"
 
 /* USER CODE END Includes */
 
@@ -35,17 +37,17 @@ ADC_HandleTypeDef hadc1;
 TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
-uint16_t ADC_val[2];						//vector de la lectura de ambos potenciometros
+//uint16_t ADC_val[2];						//vector de la lectura de ambos potenciometros
 volatile uint8_t shoot_flag = 0; 			//flag de disparo
 uint32_t counter =0; 						//contador de tiempo
 float potencia = 0.0f; 						//potencia
 float grados = 0.0f; 						//angulo
-float sh_potencia = 0.0f; 						//potencia al pulsar boton
-float sh_grados = 0.0f; 						//angulo al pulsar boton
+float sh_potencia = 0.0f; 					//potencia al pulsar boton
+float sh_grados = 0.0f; 					//angulo al pulsar boton
+SonidoPWM_t sonido;                         //instanciar sonido
+LectorADC_t lectorADC;						//instanciar lector
 //PWM (sonidos)
-uint32_t pwm_period = 1000;
-uint32_t pwm_duty = 500;
-uint32_t freq;
+float freq;
 //debouncer
 uint32_t Dbounce_count= 0;
 /* USER CODE END PV */
@@ -72,19 +74,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 }
 
 
-void PWM_SetFrequency(uint32_t freq)        //función para variar la frecuencia
-{
-    if(freq < 0) freq = 0;
-    if(freq > 5000) freq = 5000;
-
-    uint32_t timer_clk = 84000000;
-    uint32_t prescaler = 84 - 1;
-
-    uint32_t period = (timer_clk / ((prescaler + 1) * freq)) - 1; //calcular perdiod segun frec
-
-    __HAL_TIM_SET_AUTORELOAD(&htim2, period);
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, period / 2);
-}
 
 /* USER CODE END 0 */
 
@@ -102,7 +91,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+	HAL_Init();
 
   /* USER CODE BEGIN Init */
 
@@ -120,54 +109,43 @@ int main(void)
   MX_ADC1_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
-  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,0); //iniciar el pulse a 0 para que no suene
+  LectorADC_Init(&lectorADC); //iniciar lector
+  SonidoPWM_Init(&sonido,&htim2,TIM_CHANNEL_1,83999999,83); //inicializar sonido
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  //lectura potenciometros, es muy complejo por interrupcion
-	  HAL_ADC_Start(&hadc1);
-	  if(HAL_ADC_PollForConversion(&hadc1, 100)==HAL_OK){
-	   ADC_val[0]=HAL_ADC_GetValue(&hadc1); //primer potenciometro(angulo)
-	  }
-	  if(HAL_ADC_PollForConversion(&hadc1, 100)==HAL_OK){
-	    ADC_val[1]=HAL_ADC_GetValue(&hadc1); //segundo (potencia)
-	  }
-	  HAL_ADC_Stop(&hadc1);
+	  //leer potenciometros
+	  LectorADC_Actualizar(&lectorADC);  //actualizar grados y potencia
 
-	  //conversion
-	  grados   = (ADC_val[0] * 180.0f) / 1023.0f;
-	  potencia = (ADC_val[1] * 100.0f) / 1023.0f;
+	  grados   = LectorADC_GetGrados(&lectorADC);
+	  potencia = LectorADC_GetPotencia(&lectorADC);
 
 	  if(shoot_flag ==1){
 	      HAL_NVIC_DisableIRQ(EXTI1_IRQn);
+		 shoot_flag = 0;
+		 sh_potencia = potencia;
+		 sh_grados   = grados;
+		 freq = 200 + sh_potencia * 20;
+		 SonidoPWM_Beep(&sonido,frec,200);
 		  while (HAL_NVIC_GetPendingIRQ(EXTI1_IRQn)) { //borrar las solicitudes pendientes
 		 		   __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_1);
-		 		  HAL_NVIC_ClearPendingIRQ(EXTI1_IRQn);
+		 		   HAL_NVIC_ClearPendingIRQ(EXTI1_IRQn);
 		  }
+         HAL_NVIC_EnableIRQ(EXTI1_IRQn);
+  	  }
+  }
 
 		  //variables cuando el boton es pulsado
-		  shoot_flag = 0;
-		  sh_potencia = potencia;
-		  sh_grados   = grados;
-		  freq = 200 + (uint32_t)(sh_potencia * 20);  // frecuencia segun potencia 200Hz – 2200Hz
-		  counter = HAL_GetTick();
-		  HAL_NVIC_EnableIRQ(EXTI1_IRQn);
 
-		  while(HAL_GetTick()-counter<200){
-			  PWM_SetFrequency(freq);
-		  }
-	  }
-	  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,0); // reinicar el pulse a 0 para que no suene
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
-}
+
 
 /**
   * @brief System Clock Configuration

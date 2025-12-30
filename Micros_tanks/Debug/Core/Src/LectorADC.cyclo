@@ -1,0 +1,4 @@
+../Core/Src/LectorADC.c:6:6:LectorADC_Init	1
+../Core/Src/LectorADC.c:14:6:LectorADC_Actualizar	3
+../Core/Src/LectorADC.c:30:7:LectorADC_GetGrados	1
+../Core/Src/LectorADC.c:35:7:LectorADC_GetPotencia	1

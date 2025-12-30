@@ -1,0 +1,32 @@
+#ifndef SRC_SONIDOPWM_H_
+#define SRC_SONIDOPWM_H_
+
+#include "main.h"
+#include <stdint.h>
+
+typedef struct {
+	TIM_HandleTypeDef *htim;
+	uint32_t channel;
+	uint32_t timer_clk;
+	uint32_t prescaler;
+} SonidoPWM_t;
+
+//inicializar
+void SonidoPWM_Init(SonidoPWM_t *s,
+		            TIM_HandleTypeDef *htim,
+		            uint32_t channel,
+		            uint32_t timer_clk,
+		            uint32_t prescaler);
+
+//cambiar la frecuencia
+void SonidoPWM_SetFrecuencia(SonidoPWM_t *s, float freq);
+
+//Parar
+void SonidoPWM_Stop(SonidoPWM_t *s);
+
+// Reproduicir sonido básico x segundos
+void SonidoPWM_Beep(SonidoPWM_t *s, float freq, float duration_ms);
+
+//sonido victoria
+void SonidoPWM_Win(SonidoPWM_t *s);
+#endif /* SRC_SONIDOPWM_H_ */
