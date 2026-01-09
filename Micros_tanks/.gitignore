@@ -1,10 +1,10 @@
-# Archivos de compilación (Basura temporal)
+# Archivos de compilación
 Debug/
 Release/
 build/
 bin/
 
-# Archivos de configuración de usuario del IDE (Para que no se peleen vuestras configuraciones)
+# Archivos de configuración de usuario del IDE
 .settings/
 .project
 .cproject
