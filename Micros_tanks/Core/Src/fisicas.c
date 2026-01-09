@@ -1,90 +1,160 @@
+/*
+ * fisicas.c
+ *
+ *  Created on: Jan 5, 2026
+ *      Author: omarf
+ */
+#include "config.h"
 #include "fisicas.h"
-#include "drivers_hardware.h" // Necesitamos las definiciones pero NO HW_UpdateDisplay
+#include "drivers_hardware.h"
 #include <math.h>
+#include <stdlib.h>
 
 // --- MEMORIA DE VÍDEO (Privada de este módulo) ---
 static volatile uint32_t framebuffer[16];
 
-// Variables internas de la bala
-static float bala_x, bala_y, bala_vx, bala_vy;
-#define GRAVEDAD 0.02f
 
-// --- FUNCIONES DE MEMORIA ---
+// --- VARIABLES FÍSICAS INTERNAS ---
+static float bala_x, bala_y;
+static float bala_vx, bala_vy;
 
-uint32_t* Fisicas_GetBuffer(void) {
-    return (uint32_t*)framebuffer;
-}
 
-void ClearScreen(void) {
-    for(int i = 0; i < 16; i++) framebuffer[i] = 0;
-}
-
-void SetPixel(int x, int y, int color) {
+// --- FUNCIONES PRIVADAS (Auxiliares) ---
+static void SetPixel(int x, int y, int color) {
     if (x >= 0 && x < 32 && y >= 0 && y < 16) {
         if (color) framebuffer[y] |= (1UL << x);
         else       framebuffer[y] &= ~(1UL << x);
     }
 }
 
+static void PintarTanque(int x, int y, int direccion) {
+    // 0=Vacío, 1=Pintar. Matriz 3x3.
+    static const int FORMA[3][3] = {
+        {0,0,1}, // Cañón (arriba)
+        {1,1,0}, // Cuerpo
+        {1,1,1}  // Orugas (abajo)
+    };
+
+    for (int f = 0; f < 3; f++) {
+        for (int c = 0; c < 3; c++) {
+            // Si direccion es 1 (Derecha/J1), pintamos normal.
+            // Si es -1 (Izquierda/J2), invertimos columnas (espejo).
+            int col_leida = (direccion == 1) ? c : (2 - c);
+
+            if (FORMA[f][col_leida] == 1) {
+                SetPixel(x + c, y + f, 1);
+            }
+        }
+    }
+}
+
+
+
+// --- FUNCIONES PÚBLICAS (Las que pide el .h) ---
+
+void Fisicas_Init(void) {
+    Fisicas_LimpiarPantalla();
+    bala_x = 0; bala_y = 0;
+    bala_vx = 0; bala_vy = 0;
+}
+
+uint32_t* Fisicas_GetBuffer(void) {
+    return (uint32_t*)framebuffer;
+}
+
+void Fisicas_LimpiarPantalla(void) {
+    for(int i = 0; i < 16; i++) framebuffer[i] = 0;
+}
+
+/*
+void ClearScreen(void) {
+    for(int i = 0; i < 16; i++) framebuffer[i] = 0;
+}
+
+
 // --- DIBUJO ---
 
 // Funciones para que el main sepa dónde dibujar la explosión
 int Fisicas_GetBalaX(void) { return (int)bala_x; }
 int Fisicas_GetBalaY(void) { return (int)bala_y; }
+*/
 
-
-void PintarTanque(int x, int y, int direccion) {
-    static const int FORMA[3][3] = {
-    		{0,0,1},
-			{1,1,0},
-			{1,1,1}
-    };
-    for (int f = 0; f < 3; f++) {
-        for (int c = 0; c < 3; c++) {
-            int col_leida = (direccion == 1) ? c : (2 - c);
-            if (FORMA[f][col_leida] == 1) SetPixel(x + c, y + f, 1);
-        }
-    }
-}
 
 // Dibuja suelo, muro y tanques (usando los parámetros que le pase la FSM)
-void DibujarEscenario(int t1_x, int t1_y, int t2_x, int t2_y) {
+void Fisicas_DibujarEscenario(int t1_x, int t1_y, int t2_x, int t2_y) {
+
     // Suelo
     for(int x = 0; x < 32; x++) SetPixel(x, 15, 1);
 
-    // Muro (He copiado tu diseño de muros dobles)
+    // Muros
     for(int y = 15 - 7; y < 15; y++) {
         SetPixel(13, y, 1); SetPixel(14, y, 1); // Muro 1
         SetPixel(17, y, 1); SetPixel(18, y, 1); // Muro 2
     }
 
     // Tanques
-    PintarTanque(t1_x, t1_y, 1);
-    PintarTanque(t2_x, t2_y, -1);
+    PintarTanque(t1_x, t1_y, 1);  // J1 mira derecha
+    PintarTanque(t2_x, t2_y, -1); // J2 mira izquierda
 }
+
+
+
 
 // --- FÍSICAS DE LA BALA ---
 
 // Configura el disparo inicial
-void Fisicas_IniciarDisparo(int jugador, float angulo, float fuerza, int origen_x, int origen_y) {
-    float radianes = angulo * (3.14159f / 180.0f);
-    float velocidad = fuerza * 0.02f; // Factor de ajuste
+void Fisicas_PrepararDisparo(int jugador, float angulo, int origen_x, int origen_y) {
 
-    // Ajustamos origen para que salga del cañón
-    if (jugador == 1) {
-        bala_x = origen_x + 1;
-        bala_y = origen_y - 1;
-        bala_vx = cosf(radianes) * velocidad;
-        bala_vy = -sinf(radianes) * velocidad;
+    float radianes = angulo * (3.14159f / 180.0f);
+
+    // Ajuste de posición de salida (para que salga del cañón y no del centro)
+    if (jugador == JUGADOR_1) {
+        bala_x = origen_x + 2;
+        bala_y = origen_y;
+        bala_vx = cosf(radianes) * VELOCIDAD_DISPARO;
+        bala_vy = -sinf(radianes) * VELOCIDAD_DISPARO; // -Y es arriba
     } else {
-        bala_x = origen_x; // Lado izquierdo del tanque 2
-        bala_y = origen_y - 1;
-        bala_vx = -cosf(radianes) * velocidad; // Hacia la izquierda
-        bala_vy = -sinf(radianes) * velocidad;
+        bala_x = origen_x;
+        bala_y = origen_y;
+        bala_vx = -cosf(radianes) * VELOCIDAD_DISPARO; // X negativa hacia izq
+        bala_vy = -sinf(radianes) * VELOCIDAD_DISPARO;
     }
 }
 
-// Actualiza posición y detecta choques ("Caja Negra")
+
+void Fisicas_CalcularSiguientePosicion(void) {
+    bala_vy += GRAVEDAD; // La gravedad aumenta la velocidad de caída
+    bala_x += bala_vx;
+    bala_y += bala_vy;
+}
+
+int Fisicas_DetectarColision(int objetivo_x, int objetivo_y) {
+    int ix = (int)bala_x;
+    int iy = (int)bala_y;
+
+    // 1. Salida de pantalla (Lados o suelo muy profundo)
+    if (ix < 0 || ix > 32 || iy > 16) return COLISION_NADA; // FSM manejará la salida
+
+    // 2. Choque con Suelo
+    if (iy >= 15) return COLISION_OBSTACULO;
+
+    // 3. Choque con Muros (Coordenadas fijas de los muros)
+    if (iy >= 8 && iy < 15) {
+        if ((ix >= 13 && ix <= 14) || (ix >= 17 && ix <= 18)) {
+            return COLISION_OBSTACULO;
+        }
+    }
+
+    // 4. Choque con Tanque Objetivo (Hitbox 3x3)
+    if (ix >= objetivo_x && ix <= (objetivo_x + 2) &&
+        iy >= objetivo_y && iy <= (objetivo_y + 2)) {
+        return COLISION_TANQUE;
+    }
+
+    return COLISION_NADA;
+}
+
+/*
 uint8_t ProcesarBala(int objetivo_x, int objetivo_y) {
     // 1. Física
     bala_vy += GRAVEDAD;
@@ -116,8 +186,26 @@ uint8_t ProcesarBala(int objetivo_x, int objetivo_y) {
         }
     return 0; // 0 = SIGUE VOLANDO
 }
+*/
 
-void DibujarExplosion(int x, int y, uint32_t tiempo_explosion) {
+void Fisicas_PintarBala(void) {
+    int ix = (int)bala_x;
+    int iy = (int)bala_y;
+    SetPixel(ix, iy, 1);
+}
+
+// Getters para que la FSM sepa dónde explotó
+int Fisicas_GetBalaX(void) { return (int)bala_x; }
+int Fisicas_GetBalaY(void) { return (int)bala_y; }
+
+
+
+
+
+// --- ANIMACIONES ---
+
+
+void Fisicas_DibujarExplosion(int x, int y, uint32_t tiempo_explosion) {
 	//tiempo_explosion se inicia el momento en el que se produce la explosion
      SetPixel(x, y, 1);
      if(HAL_GetTick()-tiempo_explosion>900) {
@@ -155,7 +243,7 @@ void DibujarExplosion(int x, int y, uint32_t tiempo_explosion) {
          SetPixel(x-1, y+1, 1);
      }
 }
-// --- PANTALLA DE GAME OVER ---
+
 
 // Función auxiliar para dibujar un carácter de 8x8 en una posición concreta
 // Recibe el array de 8 bytes (bitmap) que define la letra
@@ -171,11 +259,12 @@ static void DibujarLetra8x8(int x_offset, int y_offset, const uint8_t *letra) {
     }
 }
 
-void DibujarGameOver(void) {
-    // 1. Borramos todo lo que hubiera antes
-    ClearScreen();
 
-    // 2. Definición de las letras (Mapas de bits 8x8)
+void Fisicas_DibujarGameOver(void) {
+    // Borrar lo que hubiera antes
+	Fisicas_LimpiarPantalla();
+
+    // Definición de las letras (Mapas de bits 8x8)
     // Cada byte es una fila, de arriba a abajo.
 
     const uint8_t LETRA_G[] = { 0x3C, 0x66, 0xC0, 0xC0, 0xCE, 0xC6, 0x66, 0x3E };
@@ -188,16 +277,17 @@ void DibujarGameOver(void) {
     const uint8_t LETRA_R[] = { 0xF8, 0xFC, 0xC6, 0xC6, 0xFC, 0xF8, 0xC6, 0xC6 };
     // Reutilizamos la E de arriba
 
-    // 3. Dibujar "GAME" en la fila superior (Y=0)
+    // Dibujar "GAME" en la fila superior (Y=0)
     // Matriz 0 (X=0), Matriz 1 (X=8), Matriz 2 (X=16), Matriz 3 (X=24)
     DibujarLetra8x8(0,  0, LETRA_E);
     DibujarLetra8x8(8,  0, LETRA_M);
     DibujarLetra8x8(16, 0, LETRA_A);
     DibujarLetra8x8(24, 0, LETRA_G);
 
-    // 4. Dibujar "OVER" en la fila inferior (Y=8)
+    // Dibujar "OVER" en la fila inferior (Y=8)
     DibujarLetra8x8(0,  8, LETRA_R);
     DibujarLetra8x8(8,  8, LETRA_E);
     DibujarLetra8x8(16, 8, LETRA_V);
     DibujarLetra8x8(24, 8, LETRA_O);
 }
+

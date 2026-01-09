@@ -1,0 +1,16 @@
+# Archivos de compilación (Basura temporal)
+Debug/
+Release/
+build/
+bin/
+
+# Archivos de configuración de usuario del IDE (Para que no se peleen vuestras configuraciones)
+.settings/
+.project
+.cproject
+.mxproject
+*.launch
+
+# Archivos temporales del sistema
+.DS_Store
+Thumbs.db

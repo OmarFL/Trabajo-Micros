@@ -34,34 +34,34 @@ $(wildcard ../makefile.init) \
 $(wildcard ../makefile.targets) \
 
 
-BUILD_ARTIFACT_NAME := MatrizLeds
+BUILD_ARTIFACT_NAME := Micros_tanks
 BUILD_ARTIFACT_EXTENSION := elf
 BUILD_ARTIFACT_PREFIX :=
 BUILD_ARTIFACT := $(BUILD_ARTIFACT_PREFIX)$(BUILD_ARTIFACT_NAME)$(if $(BUILD_ARTIFACT_EXTENSION),.$(BUILD_ARTIFACT_EXTENSION),)
 
 # Add inputs and outputs from these tool invocations to the build variables 
 EXECUTABLES += \
-MatrizLeds.elf \
+Micros_tanks.elf \
 
 MAP_FILES += \
-MatrizLeds.map \
+Micros_tanks.map \
 
 SIZE_OUTPUT += \
 default.size.stdout \
 
 OBJDUMP_LIST += \
-MatrizLeds.list \
+Micros_tanks.list \
 
 
 # All Target
 all: main-build
 
 # Main-build Target
-main-build: MatrizLeds.elf secondary-outputs
+main-build: Micros_tanks.elf secondary-outputs
 
 # Tool invocations
-MatrizLeds.elf MatrizLeds.map: $(OBJS) $(USER_OBJS) C:\Users\david\STM32CubeIDE\workspace_1.19.0\MatrizLeds\Trabajo-Micros\Micros_tanks\STM32F407VGTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "MatrizLeds.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\david\STM32CubeIDE\workspace_1.19.0\MatrizLeds\Trabajo-Micros\Micros_tanks\STM32F407VGTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="MatrizLeds.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+Micros_tanks.elf Micros_tanks.map: $(OBJS) $(USER_OBJS) C:\Users\omarf\Documents\GitHub\Trabajo-Micros\Micros_tanks\STM32F407VGTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "Micros_tanks.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\omarf\Documents\GitHub\Trabajo-Micros\Micros_tanks\STM32F407VGTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Micros_tanks.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
@@ -70,14 +70,14 @@ default.size.stdout: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
 	@echo 'Finished building: $@'
 	@echo ' '
 
-MatrizLeds.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "MatrizLeds.list"
+Micros_tanks.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "Micros_tanks.list"
 	@echo 'Finished building: $@'
 	@echo ' '
 
 # Other Targets
 clean:
-	-$(RM) MatrizLeds.elf MatrizLeds.list MatrizLeds.map default.size.stdout
+	-$(RM) Micros_tanks.elf Micros_tanks.list Micros_tanks.map default.size.stdout
 	-@echo ' '
 
 secondary-outputs: $(SIZE_OUTPUT) $(OBJDUMP_LIST)

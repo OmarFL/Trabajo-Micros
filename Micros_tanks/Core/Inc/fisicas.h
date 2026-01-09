@@ -1,14 +1,30 @@
-#ifndef FISICAS_H
-#define FISICAS_H
+/*
+ * fisicas.h
+ *
+ *  Created on: Jan 5, 2026
+ *      Author: omarf
+ */
+
+#ifndef INC_FISICAS_H_
+#define INC_FISICAS_H_
+
 #include <stdint.h>
+
+void Fisicas_Init(void);
 uint32_t* Fisicas_GetBuffer(void);
-void ClearScreen(void);
-void SetPixel(int x, int y, int color);
-void DibujarEscenario(int t1_x, int t1_y, int t2_x, int t2_y);
-void Fisicas_IniciarDisparo(int jugador, float angulo, float fuerza, int origen_x, int origen_y);
-uint8_t ProcesarBala(int objetivo_x, int objetivo_y);
-void DibujarExplosion(int x, int y, uint32_t tiempo);
+void Fisicas_LimpiarPantalla(void);
+
+// Dibujado
+void Fisicas_DibujarEscenario(int t1_x, int t1_y, int t2_x, int t2_y);
+void Fisicas_DibujarExplosion(int x, int y, uint32_t tiempo_explosion);
+void Fisicas_DibujarGameOver(void);
+void Fisicas_PintarBala(void);
+
+// Lógica
+void Fisicas_PrepararDisparo(int jugador, float angulo, int origen_x, int origen_y);
+void Fisicas_CalcularSiguientePosicion(void);
+int Fisicas_DetectarColision(int objetivo_x, int objetivo_y);
 int Fisicas_GetBalaX(void);
 int Fisicas_GetBalaY(void);
-void DibujarGameOver(void);
-#endif
+
+#endif /* INC_FISICAS_H_ */
